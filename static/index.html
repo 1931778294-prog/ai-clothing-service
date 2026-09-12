@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简衣服饰旗舰店 · AI 智能客服</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { brand: '#b45309', brandLight: '#fef3e8' } } }
+        }
+    </script>
+    <style>
+        .chat-box::-webkit-scrollbar { width: 5px; }
+        .chat-box::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 3px; }
+        .typing span { display:inline-block; width:6px; height:6px; margin:0 2px; background:#a8a29e; border-radius:50%; animation:blink 1.2s infinite; }
+        .typing span:nth-child(2){ animation-delay:.2s; }
+        .typing span:nth-child(3){ animation-delay:.4s; }
+        @keyframes blink { 0%,80%,100%{opacity:.2;} 40%{opacity:1;} }
+    </style>
+</head>
+<body class="bg-stone-100 min-h-screen flex justify-center items-center p-2 md:p-4">
+    <div class="w-full max-w-2xl bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col" style="height: 92vh; max-height: 820px;">
+        <!-- 头部 -->
+        <div class="bg-brand text-white px-5 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                    <i class="fa fa-shopping-bag text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold leading-tight">简衣服饰旗舰店</h1>
+                    <p class="text-xs text-white/80 flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-green-300 inline-block"></span>AI 智能客服在线 · DeepSeek 驱动
+                    </p>
+                </div>
+            </div>
+            <button onclick="resetChat()" title="清空对话" class="text-white/80 hover:text-white text-sm">
+                <i class="fa fa-refresh"></i>
+            </button>
+        </div>
+
+        <!-- 知识库状态条 -->
+        <div class="bg-amber-50 px-5 py-2 text-xs text-amber-800 border-b border-amber-100">
+            <i class="fa fa-database mr-1"></i>已加载：6 款商品资料 · 尺码表 · 售后政策 · 满减活动
+        </div>
+
+        <!-- 聊天区 -->
+        <div id="chatBox" class="chat-box flex-1 overflow-y-auto p-5 space-y-4 bg-stone-50"></div>
+
+        <!-- 快捷问题 -->
+        <div class="px-4 pt-2 flex flex-wrap gap-2 bg-white border-t border-stone-100">
+            <button onclick="quickAsk('纯棉T恤多少钱？有哪些颜色？')" class="text-xs px-3 py-1.5 rounded-full bg-stone-100 hover:bg-amber-100 text-stone-600">T恤价格</button>
+            <button onclick="quickAsk('我不知道选什么尺码')" class="text-xs px-3 py-1.5 rounded-full bg-stone-100 hover:bg-amber-100 text-stone-600">尺码推荐</button>
+            <button onclick="quickAsk('退货规则是什么？')" class="text-xs px-3 py-1.5 rounded-full bg-stone-100 hover:bg-amber-100 text-stone-600">售后规则</button>
+            <button onclick="quickAsk('满减活动有哪些？')" class="text-xs px-3 py-1.5 rounded-full bg-stone-100 hover:bg-amber-100 text-stone-600">优惠活动</button>
+            <button onclick="quickAsk('衣服收到是破的，我非常生气，我要投诉！')" class="text-xs px-3 py-1.5 rounded-full bg-stone-100 hover:bg-red-100 text-stone-600">投诉转人工</button>
+        </div>
+
+        <!-- 输入区 -->
+        <div class="p-4 flex gap-2 bg-white border-t border-stone-100">
+            <input id="userInput" type="text" placeholder="请输入您的问题，如：卫衣是什么材质？"
+                   class="flex-1 border border-stone-300 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand">
+            <button onclick="sendMsg()" class="bg-brand hover:bg-amber-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium">
+                <i class="fa fa-paper-plane mr-1"></i>发送
+            </button>
+        </div>
+    </div>
+
+<script>
+// 同源部署：直接请求相对路径 /chat，本地与线上都不用改
+const API_URL = "/chat";
+const chatBox = document.getElementById("chatBox");
+const input = document.getElementById("userInput");
+let history = [];   // 多轮对话历史 {role, content}
+let loading = false;
+
+function addMsg(text, role) {
+    const wrap = document.createElement("div");
+    wrap.className = role === "user" ? "flex justify-end" : "flex";
+    const bubble = role === "user"
+        ? `<div class="bg-brand text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[82%] text-sm whitespace-pre-wrap leading-relaxed">${escapeHtml(text)}</div>`
+        : `<div class="flex gap-2 items-start max-w-[88%]">
+             <div class="w-8 h-8 rounded-full bg-brand flex items-center justify-center text-white text-xs shrink-0"><i class="fa fa-robot"></i></div>
+             <div class="bg-white border border-stone-200 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed text-stone-700 shadow-sm">${escapeHtml(text)}</div>
+           </div>`;
+    wrap.innerHTML = bubble;
+    chatBox.appendChild(wrap);
+    chatBox.scrollTop = chatBox.scrollHeight;
+    return wrap;
+}
+
+function addTyping() {
+    const wrap = document.createElement("div");
+    wrap.className = "flex";
+    wrap.id = "typingBubble";
+    wrap.innerHTML = `<div class="flex gap-2 items-start">
+        <div class="w-8 h-8 rounded-full bg-brand flex items-center justify-center text-white text-xs shrink-0"><i class="fa fa-robot"></i></div>
+        <div class="bg-white border border-stone-200 rounded-2xl px-4 py-3 typing"><span></span><span></span><span></span></div>
+    </div>`;
+    chatBox.appendChild(wrap);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+function removeTyping() {
+    document.getElementById("typingBubble")?.remove();
+}
+
+function escapeHtml(s) {
+    const d = document.createElement("div");
+    d.innerText = s;
+    return d.innerHTML;
+}
+
+async function sendMsg() {
+    if (loading) return;
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    addMsg(text, "user");
+    history.push({ role: "user", content: text });
+    loading = true;
+    addTyping();
+    try {
+        const res = await fetch(API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: text, history: history.slice(0, -1) })
+        });
+        const data = await res.json();
+        removeTyping();
+        addMsg(data.reply || "（无回复）", "assistant");
+        history.push({ role: "assistant", content: data.reply || "" });
+    } catch (e) {
+        removeTyping();
+        addMsg("网络异常，请确认后端服务已启动。", "assistant");
+    } finally {
+        loading = false;
+    }
+}
+
+function quickAsk(q) {
+    input.value = q;
+    sendMsg();
+}
+
+function resetChat() {
+    history = [];
+    chatBox.innerHTML = "";
+    welcome();
+}
+
+function welcome() {
+    addMsg("您好，欢迎光临简衣服饰旗舰店～我是您的专属 AI 客服，商品、尺码、发货、售后问题都可以问我。还有什么可以帮您的吗？", "assistant");
+}
+
+input.addEventListener("keydown", e => { if (e.key === "Enter") sendMsg(); });
+welcome();
+</script>
+</body>
+</html>
