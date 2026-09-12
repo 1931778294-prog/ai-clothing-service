@@ -1,0 +1,7 @@
+# 密钥与环境文件，禁止上传到 GitHub
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
