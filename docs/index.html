@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简衣服饰旗舰店 · AI 智能客服</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { brand: '#b45309', brandLight: '#fef3e8' } } }
+        }
+    </script>
+    <style>
+        .chat-box::-webkit-scrollbar { width: 5px; }
+        .chat-box::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 3px; }
+        .typing span { display:inline-block; width:6px; height:6px; margin:0 2px; background:#a8a29e; border-radius:50%; animation:blink 1.2s infinite; }
+        .typing span:nth-child(2){ animation-delay:.2s; }
+        .typing span:nth-child(3){ animation-delay:.4s; }
+        @keyframes blink { 0%,80%,100%{opacity:.2;} 40%{opacity:1;} }
+    </style>
+</head>
+<body class="bg-stone-100 min-h-screen flex justify-center items-center p-2 md:p-4">
+    <div class="w-full max-w-2xl bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col" style="height: 92vh; max-height: 820px;">
+        <!-- 头部 -->
+        <div class="bg-brand text-white px-5 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                    <i class="fa fa-shopping-bag text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold leading-tight">简衣服饰旗舰店</h1>
+                    <p class="text-xs text-white/80 flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-green-300 inline-block"></span>AI 智能客服在线 · DeepSeek 驱动
+                    </p>
+                </div>
+            </div>
+            <button onclick="resetChat()" title="清空对话" class="text-white/80 hover:text-white text-sm">
+                <i class="fa fa-refresh"></i>
+            </button>
+        </div>
+
+        <!-- 知识库状态条 -->
+        <div class="bg-amber-50 px-5 py-2 text-xs text-amber-800 border-b border-amber-100">
+            <i class="fa fa-database mr-1"></i>已加载：6 款商品资料 · 尺码表 · 售后政策 · 满减活动
+        </div>
+
+        <!-- 聊天区 -->
+        <div id="chatBox" class="chat-box flex-1 overflow-y-auto p-5 space-y-4 bg-stone-50"></div>
+
+        <!-- 快捷问题 -->
+        <div class="px-4 pt-2 flex flex-wrap gap-2 bg-white border-t border-stone-100">
+            <button onclick="quickAsk('纯棉T恤多少钱？有哪些颜色？')" class="text-xs px-3 py-1.5 rounded-full bg-stone-100 hover:bg-amber-100 text-stone-600">T恤价格</button>
+            <button onclick="quickAsk('我不知道选什么尺码')" class="text-xs px-3 py-1.5 rounded-full bg-stone-100 hover:bg-amber-100 text-stone-600">尺码推荐</button>
+            <button onclick="quickAsk('退货规则是什么？')" class="text-xs px-3 py-1.5 rounded-full bg-stone-100 hover:bg-amber-100 text-stone-600">售后规则</button>
+            <button onclick="quickAsk('满减活动有哪些？')" class="text-xs px-3 py-1.5 rounded-full bg-stone-100 hover:bg-amber-100 text-stone-600">优惠活动</button>
+            <button onclick="quickAsk('衣服收到是破的，我非常生气，我要投诉！')" class="text-xs px-3 py-1.5 rounded-full bg-stone-100 hover:bg-red-100 text-stone-600">投诉转人工</button>
+        </div>
+
+        <!-- 输入区 -->
+        <div class="p-4 flex gap-2 bg-white border-t border-stone-100">
+            <input id="userInput" type="text" placeholder="请输入您的问题，如：卫衣是什么材质？"
+                   class="flex-1 border border-stone-300 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand">
+            <button onclick="sendMsg()" class="bg-brand hover:bg-amber-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium">
+                <i class="fa fa-paper-plane mr-1"></i>发送
+            </button>
+        </div>
+    </div>
+
+<script>
+// ============ 大模型配置（浏览器直连 DeepSeek，免后端服务器）============
+const API_URL = "https://api.deepseek.com/chat/completions";
+const MODEL = "deepseek-chat";
+// 演示用 Key：可在浏览器控制台执行 localStorage.setItem('DS_KEY','你的key') 覆盖
+const DEFAULT_KEY = "sk-bc36a1826277413790fc4e28556eedce";
+const API_KEY = (localStorage.getItem("DS_KEY") || DEFAULT_KEY).trim();
+const MAX_HISTORY = 10;
+
+// ============ 系统提示词 + 店铺知识库（与后端版一致，原样迁移）============
+const SYSTEM_PROMPT = `
+你是一名电商服装店"简衣"的客服，热情、专业、有耐心。
+
+【你的回答原则】
+1. 所有商品信息（价格、尺码、颜色、材质、发货时间）和售后政策，必须严格依据知识库里的资料回答，资料里没有的信息一律不能编造。
+2. 遇到资料里没有、或你不确定的问题，明确回答："这个我不太确定，建议您联系人工客服确认哦"，不要乱猜。
+3. 回复要简短、分点、结论先行，不要一大段话。结尾加一句"还有什么可以帮您的吗？"
+
+【尺码推荐规则】
+当用户想买衣服但对尺码不确定时，主动问："方便发下您的身高和体重吗？我帮您推荐合适的尺码。"
+拿到身高体重后，对照知识库里的尺码表给出推荐尺码，并简要说明理由。
+
+【转人工兜底】
+遇到退款争议、投诉、用户情绪激动、或复杂的售后问题，统一回复："您的情况我已记录，稍后为您转接人工客服处理。" 然后简要总结用户的问题（形成工单要点）。
+
+# 简衣服饰店 店铺资料
+【店铺基本信息】
+- 店铺名：简衣服饰旗舰店
+- 主营：基础款服装（T恤、牛仔裤、卫衣、羽绒服、羊毛衫等）
+- 发货地：浙江杭州
+- 默认快递：中通快递
+- 客服在线时间：早9:00 - 晚24:00
+【商品1：纯棉基础T恤】
+价格：59元
+颜色：白色、黑色、藏青色、燕麦色
+尺码：S / M / L / XL / XXL
+材质：100%纯棉，克重220g，不易变形
+库存：现货，48小时内发货
+卖点：基础百搭，领口加固不变形
+【商品2：直筒牛仔裤】
+价格：129元
+颜色：浅蓝、深蓝、黑色
+尺码：26 / 27 / 28 / 29 / 30 / 31 / 32 / 34 / 36
+材质：微弹棉感面料，厚度适中，四季可穿
+库存：现货，48小时内发货
+卖点：显腿直，微弹不勒
+【商品3：加绒连帽卫衣】
+价格：99元
+颜色：灰色、黑色、燕麦色、雾霾蓝
+尺码：M / L / XL / XXL / 3XL
+材质：内里加绒（摇粒绒），外层纯棉
+库存：现货，48小时内发货
+卖点：加厚保暖，男女同款
+【商品4：轻薄羽绒服】
+价格：299元
+颜色：黑色、米白、军绿、酒红
+尺码：S / M / L / XL / XXL
+材质：90%白鸭绒，充绒量120g，可折叠收纳
+库存：现货，48小时内发货
+卖点：轻便保暖，可收纳进附赠收纳袋
+【商品5：高腰阔腿裤】
+价格：109元
+颜色：黑色、杏色、焦糖色
+尺码：S / M / L / XL
+材质：垂感西装面料，松紧腰
+库存：现货，48小时内发货
+卖点：显高显瘦，遮肉
+【商品6：美利奴羊毛衫】
+价格：159元
+颜色：燕麦色、深灰、藏蓝、焦糖
+尺码：S / M / L / XL
+材质：美利奴羊毛混纺，可贴身穿，不起球
+库存：现货，48小时内发货
+卖点：轻薄保暖，贴身穿不扎
+【上衣尺码表（胸围cm）】
+S=94  M=98  L=102  XL=106  XXL=110  3XL=114
+【牛仔裤尺码表（腰围cm）】
+26=66  27=68  28=70  29=72  30=74  31=76  32=78  34=82  36=86
+【售后政策】
+1. 支持7天无理由退换货，需商品吊牌完整、未水洗、不影响二次销售
+2. 质量问题（破损、发错货、漏发）：卖家承担来回运费，请拍照联系客服核实
+3. 尺码不合适：可换货，买家承担来回运费；下单前可先发身高体重给客服推荐尺码
+4. 个人原因退货（不喜欢、色差）：买家承担寄回运费，退款在收到货后48小时内处理
+5. 现货48小时内发货，大促期间72小时内发货
+6. 默认中通快递，全场包邮（新疆、西藏、内蒙古、青海、宁夏需补10元运费差价）
+7. 新客首单立减5元；满199减15，满299减30
+`;
+
+const chatBox = document.getElementById("chatBox");
+const input = document.getElementById("userInput");
+let history = [];   // 多轮对话历史 {role, content}
+let loading = false;
+
+function addMsg(text, role) {
+    const wrap = document.createElement("div");
+    wrap.className = role === "user" ? "flex justify-end" : "flex";
+    const bubble = role === "user"
+        ? `<div class="bg-brand text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[82%] text-sm whitespace-pre-wrap leading-relaxed">${escapeHtml(text)}</div>`
+        : `<div class="flex gap-2 items-start max-w-[88%]">
+             <div class="w-8 h-8 rounded-full bg-brand flex items-center justify-center text-white text-xs shrink-0"><i class="fa fa-robot"></i></div>
+             <div class="bg-white border border-stone-200 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed text-stone-700 shadow-sm">${escapeHtml(text)}</div>
+           </div>`;
+    wrap.innerHTML = bubble;
+    chatBox.appendChild(wrap);
+    chatBox.scrollTop = chatBox.scrollHeight;
+    return wrap;
+}
+
+function addTyping() {
+    const wrap = document.createElement("div");
+    wrap.className = "flex";
+    wrap.id = "typingBubble";
+    wrap.innerHTML = `<div class="flex gap-2 items-start">
+        <div class="w-8 h-8 rounded-full bg-brand flex items-center justify-center text-white text-xs shrink-0"><i class="fa fa-robot"></i></div>
+        <div class="bg-white border border-stone-200 rounded-2xl px-4 py-3 typing"><span></span><span></span><span></span></div>
+    </div>`;
+    chatBox.appendChild(wrap);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+function removeTyping() {
+    document.getElementById("typingBubble")?.remove();
+}
+
+function escapeHtml(s) {
+    const d = document.createElement("div");
+    d.innerText = s;
+    return d.innerHTML;
+}
+
+async function sendMsg() {
+    if (loading) return;
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    addMsg(text, "user");
+    history.push({ role: "user", content: text });
+    loading = true;
+    addTyping();
+
+    // 组装：系统提示词(知识库) + 最近10轮 + 本轮
+    const messages = [{ role: "system", content: SYSTEM_PROMPT }]
+        .concat(history.slice(-MAX_HISTORY - 1).slice(0, -1))
+        .concat([{ role: "user", content: text }]);
+
+    try {
+        const res = await fetch(API_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + API_KEY
+            },
+            body: JSON.stringify({
+                model: MODEL,
+                messages: messages,
+                temperature: 0.3,
+                max_tokens: 700
+            })
+        });
+        removeTyping();
+        if (!res.ok) {
+            const errTxt = await res.text();
+            let hint = `大模型接口错误（HTTP ${res.status}）`;
+            if (res.status === 401) hint = "API Key 无效或已失效，请检查配置。";
+            addMsg(hint + " " + errTxt.slice(0, 160), "assistant");
+            history.push({ role: "assistant", content: hint });
+            return;
+        }
+        const data = await res.json();
+        const reply = data.choices?.[0]?.message?.content || "（无回复）";
+        addMsg(reply, "assistant");
+        history.push({ role: "assistant", content: reply });
+    } catch (e) {
+        removeTyping();
+        addMsg("网络异常，请检查网络后重试（需能访问 api.deepseek.com）。", "assistant");
+    } finally {
+        loading = false;
+    }
+}
+
+function quickAsk(q) {
+    input.value = q;
+    sendMsg();
+}
+
+function resetChat() {
+    history = [];
+    chatBox.innerHTML = "";
+    welcome();
+}
+
+function welcome() {
+    addMsg("您好，欢迎光临简衣服饰旗舰店～我是您的专属 AI 客服，商品、尺码、发货、售后问题都可以问我。还有什么可以帮您的吗？", "assistant");
+}
+
+input.addEventListener("keydown", e => { if (e.key === "Enter") sendMsg(); });
+welcome();
+</script>
+</body>
+</html>
